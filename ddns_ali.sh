@@ -15,6 +15,7 @@ _CURL='curl -s --connect-timeout 10'
 GET_IP_URL="https://icanhazip.com https://www.trackip.net/ip https://myip.wtf/text"
 ALIDNS_URL="http://alidns.aliyuncs.com/"
 CRON_CMD="/sbin/ddns_ali.sh -d"
+STATUS="good nochg nohost abuse notfqdn badauth 911 badagent badresolv badconn"
 
 log(){
   printf "[%s]: %s\n" >&2 "$(date +'%Y-%m-%d %H:%M:%S')" "$*"
@@ -152,7 +153,7 @@ get_root_domain(){
   while [ $i -gt 0 ]; do
     d=$(echo "$1" | cut -d '.' -f $i-)
     if [ -z "$d" ]; then
-      return 1
+      return 4
     fi
     q=$( echo "$ds" | grep -oE "^$d$")
     if [ -n "$q" ];then
@@ -161,6 +162,7 @@ get_root_domain(){
     fi
     i=$(( i - 1 ))
   done
+  return 2
 }
 
 #$1:AccessKeyId,$2:AccessKeySecret
@@ -171,8 +173,10 @@ get_domain(){
   sign=$(sign_data "$2" "${params}")
   req_url="${ALIDNS_URL}?${params}&Signature=${sign}"
   resp=$($_CURL "$req_url")
-  if echo "$resp" | grep -qw "Message";then
-    return 2
+  if echo "$resp" | grep -iqE "InvalidAccessKeyId|SignatureDoesNotMatchA";then
+    return 5
+  elif echo "$resp" | grep -iqE "Message";then
+    return 9
   else
     echo "$resp" | jq -r ".Domains.Domain | .[].DomainName"
   fi
@@ -240,7 +244,7 @@ del_dns(){
     if [ "${rrid}" != "null" ];then
       log "The DNS record [$rid] has been deleted successfully."
     else
-      rv=5
+      rv=2
       log "Failed to delete dns [$rid}]."
     fi
   done
@@ -279,7 +283,7 @@ update_dns(){
   elif [ "${rid}" != "null" ];then
     log "The DNS record [$4.$3: $6] has been updated successfully."
   else
-    rv=6
+    rv=3
     log "Failed to update dns [$4.$3: $6]."
   fi
   echo ${rv}
@@ -372,6 +376,7 @@ help()
 }
 
 main(){
+  rv=0
   opt_type=0
   while getopts "i:l:n:t:v:s:-:46adhur" opt; do
     case "${opt}" in
@@ -412,12 +417,27 @@ main(){
 
   if [ -n "${name}" ];then
     domains=$(get_domain "${key_id}" "${key_secret}")
+    rv=$?
     if [ -z "${domains}" ];then
-      log "Authentication failed."
-      [ "${act}" = 4 ] && echo "badauth"
-      return
+      if [ "${act}" = 4 ];then
+        echo "${STATUS}" | cut -d ' ' -f$((rv+1))
+      else
+        log "Authentication failed."
+      fi
+      exit ${rv}
     fi
+
     root_domain=$(get_root_domain "${name}" "${domains}")
+    rv=$?
+    if [ ! ${rv} -eq 0 ];then
+      if [ "${act}" = 4 ];then
+        echo "${STATUS}" | cut -d ' ' -f$((rv+1))
+      else
+        log "The hostname [${name}] does not exist in this user account."
+      fi
+      exit ${rv}
+    fi
+
     rr=${name%%".${root_domain}"*}
   fi
   
@@ -425,29 +445,23 @@ main(){
     0 )
       rids=$(get_dns_ids "${key_id}" "${key_secret}" "${root_domain}" "${rr}" "${type}")
       if [ -n "${rids}" ];then
-        del_dns "${key_id}" "${key_secret}" "${rids}"
+        rv=$(del_dns "${key_id}" "${key_secret}" "${rids}")
       fi
       ;;
     1 )
-      add_dns "${key_id}" "${key_secret}" "${root_domain}" "${rr}" "${type}" "${value}"
+      rv=$(add_dns "${key_id}" "${key_secret}" "${root_domain}" "${rr}" "${type}" "${value}")
       ;;
     2 )
-      update_dns "${key_id}" "${key_secret}" "${root_domain}" "${rr}" "${type}" "${value}"
+      rv=$(update_dns "${key_id}" "${key_secret}" "${root_domain}" "${rr}" "${type}" "${value}")
       ;;
     3 | 4 )
       rv=$(detect_update "${key_id}" "${key_secret}" "${root_domain}" "${rr}" "${ip_source}" "${ip_type}")
       if [ "${act}" = 4 ];then
-        case "${rv}" in
-          0 ) echo "good" ;;
-          1 ) echo "nochg" ;;
-          3 ) echo "badconn" ;;
-          * ) echo "badauth" ;;
-        esac
-      else
-        echo "${rv}"
+        echo "${STATUS}" | cut -d ' ' -f$((rv+1))
       fi
       ;;
   esac
+  exit ${rv}
 }
 
 main "$@"
