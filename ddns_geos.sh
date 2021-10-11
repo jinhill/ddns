@@ -244,9 +244,9 @@ add_dns(){
     body="id=${domain_id}&name=${sub_domain}&type=${type}&content=${value}&ttl=300&prio=0"
     resp=$(_CURL -X POST -d "$body" "https://www.geoscaling.com/dns2/ajax/add_record.php")
     if echo "${resp}" | grep -q '"code":"OK"'; then
-      log 2 "${full_domain}:${value} record added successfully."
+      log 2 "The DNS record [${full_domain}: ${value}] has been added successfully."
     else
-      log 0 "Couldn't add the ${full_domain}:${value} record."
+      log 0 "Failed to add dns [${full_domain}: ${value}]."
       rv=4
     fi
   done
@@ -316,10 +316,10 @@ update_dns(){
   body="value=$5&id=${rid}.content"
   resp=$(_CURL -X POST -d "$body" "https://www.geoscaling.com/dns2/ajax/edit_record.php")
   if [ "${resp}" == "$5" ];then
-    log 2 "The DNS record [$4.$3: $6] has been updated successfully."
+    log 2 "The DNS record [$3: $5] has been updated successfully."
   else
     rv=3
-    log 0 "update $3:$5 error."
+    log 0 "Failed to update dns [$3: $5]."
   fi
   echo ${rv}
 }
@@ -342,18 +342,20 @@ update_smartdns() {
     return 2
   fi
   domain_id="${root_domain_info%%,*}"
+  sub_domain=$(echo "${full_domain}" | sed "s/\.\?${root_domain_info##*,}//")
   rid=$(get_smart_dns_id "${domain_id}" "${full_domain}") || return 1
   ip_value=$(echo "${value}" | grep -ioE '[a-f0-9:.]{7,}$')
   cname_value=$(echo "${value}" | grep -ioE '^\w+([-.]?\w+)*.[a-z]{2,}$')
   ip_list="";
   for ip in ${ip_value}; do
-      ip_list="${ip_list}  \$output[] = array(\"A\", \"${ip}\", \"300\");\r\n"
+  	ip_type=$(detect_type "${ip}")
+    ip_list="${ip_list}  \$output[] = array(\"${ip_type}\", \"${ip}\", \"300\");\r\n"
   done
   code='if($country == "cn"){\r\n'"${ip_list}"'}\r\nelse{\r\n  $output[] = array("CNAME", "'"${cname_value}"'");\r\n}'
   rand=$(tr -dc "0123456789abcdefABCDEF" < "/dev/urandom" | head -c16)
   boundary="----WebKitFormBoundary${rand}"
   body=$'{{BOUNDARY}}\r\nContent-Disposition: form-data; name="MAX_FILE_SIZE"\r\n\r\n65536\r\n{{BOUNDARY}}\r\nContent-Disposition: form-data; name="name"\r\n\r\n{{HOST}}\r\n{{BOUNDARY}}\r\nContent-Disposition: form-data; name="sharecountry_info"\r\n\r\non\r\n{{BOUNDARY}}\r\nContent-Disposition: form-data; name="failsafe_ip"\r\n\r\n\r\n{{BOUNDARY}}\r\nContent-Disposition: form-data; name="code"\r\n\r\n{{CODE}}\r\n{{BOUNDARY}}--\r\n'
-  body=$(echo "$body"| sed -e "s/{{BOUNDARY}}/--${boundary}/g;s/{{HOST}}/${host}/g;s/{{CODE}}/${code}/g")
+  body=$(echo "$body"| sed -e "s/{{BOUNDARY}}/--${boundary}/g;s/{{HOST}}/${sub_domain}/g;s/{{CODE}}/${code}/g")
   resp=$(_CURL -X POST "https://www.geoscaling.com/dns2/index.php?module=smart_subdomain&id=${domain_id}&subdomain_id=${rid}" \
     -H "content-type: multipart/form-data; boundary=${boundary}" \
     -H "accept: */*" \
@@ -362,9 +364,9 @@ update_smartdns() {
   ip_c=$(count "${ip_value}")
   mc=$(echo "${resp}" | grep -cE "${ip_regex}")
   if [ "$ip_c" = "$mc" ];then
-    log 2 "smartdns ${full_domain} update successfully."
+    log 2 "The smartdns record [${full_domain}] has been updated successfully."
   else
-    log 0 "Couldn't update the smartdns ${full_domain}."
+    log 0 "Failed to update smartdns [${full_domain}]."
     rv=9
   fi
   echo ${rv}
