@@ -19,7 +19,7 @@ SESSION_TIMEOUT=300
 USER_AGENT='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36'
 alias _CURL='curl -s --connect-timeout 10 -c ${COOKIE_FILE} -b ${COOKIE_FILE} -H "user-agent: $USER_AGENT" -H "accept: text/html;*/*"'
 GET_IP_URL="https://icanhazip.com https://www.trackip.net/ip https://myip.wtf/text"
-CRON_CMD="/sbin/ddns_ali.sh -d"
+CRON_CMD="/sbin/ddns_geos.sh -d"
 STATUS="good nochg nohost abuse notfqdn badauth 911 badagent badresolv badconn"
 LOG_LEVEL=2
 
