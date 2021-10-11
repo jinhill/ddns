@@ -1,8 +1,10 @@
 #! /bin/sh
-#
+#######################################################
 # DDNS for Aliyun
 # Copyright: Jinhill 2021
 # Depend on: curl jq openssl
+# Git repo: https://github.com/jinhill/ddns
+#######################################################
 
 VERSION="1.0.0"
 ACCESS_KEY_ID="YOUR_KEY_ID"
@@ -15,10 +17,13 @@ _CURL='curl -s --connect-timeout 10'
 GET_IP_URL="https://icanhazip.com https://www.trackip.net/ip https://myip.wtf/text"
 ALIDNS_URL="http://alidns.aliyuncs.com/"
 CRON_CMD="/sbin/ddns_ali.sh -d"
+#STATUS: 0     1      2     3      4       5     6     7         8        9   
 STATUS="good nochg nohost abuse notfqdn badauth 911 badagent badresolv badconn"
-
+LOG_LEVEL=2
+#$1:level $2:string
+#ERROR-0,WARN-1,INFO-2,DEBUG-3
 log(){
-  printf "[%s]: %s\n" >&2 "$(date +'%Y-%m-%d %H:%M:%S')" "$*"
+  [ $1 -le ${LOG_LEVEL} ] && printf "[%s]: %s\n" >&2 "$(date +'%Y-%m-%d %H:%M:%S')" "$2"
 }
 
 #$1:string,$2:char, if $2 not set return array len,$ret:count
@@ -41,7 +46,7 @@ get_dns(){
   resolve_cmd=nslookup
   head_line=3
   regex_str="[a-f0-9:.]{7,}$"
-  if [ $(command -v host) ];then
+  if [ -x "$(command -v host)" ];then
     #debain
     resolve_cmd=host
     if [ -z "$3" ];then
@@ -114,12 +119,12 @@ check_connect(){
 
 #$1:url
 url_encode() {
-  echo "$1" | awk -v ORS="" '{ gsub(/./,"&\n") ; print }' | while read -r l
+  echo "$1" | awk -v ORS="" '{ gsub(/./,"&\n") ; print }' | while read -r l;
   do
     case "$l" in
-      [-_.~a-zA-Z0-9] ) echo -n ${l} ;;
-      "" ) echo -n %20 ;;
-      * )  printf '%%%02X' "'$l" ;;
+      [-_.~a-zA-Z0-9] ) printf '%s' "$l" ;;
+      "" ) printf '%%20' ;;
+      * )  printf '%%%02X' "'$l"
     esac
   done
 }
@@ -127,22 +132,14 @@ url_encode() {
 #$1:dns value
 detect_type(){
   type="TXT"
-  if [ $(echo "$1" | grep -ioE '[a-f0-9:]{7,}$') ];then
+  if echo "$1" | grep -iqE '[a-f0-9:]{7,}$' ;then
     type="AAAA"
-  elif [ $(echo "$1" | grep -ioE '[0-9.]{7,}$') ];then
+  elif echo "$1" | grep -iqE '[0-9.]{7,}$' ;then
     type="A"
-  elif [ $(echo "$1" | grep -ioE '^\w+([-.]?\w+)*.[a-z]{2,}$') ];then
+  elif echo "$1" | grep -iqE '^\w+([-.]?\w+)*.[a-z]{2,}$' ;then
     type="CNAME"
   fi
-  echo "$type"
-}
-
-#$1:ACCESS_KEY_SECRET,$2:data
-sign_data(){
-  enc_str=$(url_encode "$2")
-  data="GET&%2F&${enc_str}"
-  sign=$(echo -n "${data}" | openssl dgst -binary -sha1 -hmac "$1&" | openssl base64)
-  url_encode "$sign"
+  echo "${type}"
 }
 
 #$1:full domain,$2:Aliyun domain list
@@ -163,6 +160,15 @@ get_root_domain(){
     i=$(( i - 1 ))
   done
   return 2
+}
+
+################ Aliyun Private Functions ################
+#$1:ACCESS_KEY_SECRET,$2:data
+sign_data(){
+  enc_str=$(url_encode "$2")
+  data="GET&%2F&${enc_str}"
+  sign=$(echo -n "${data}" | openssl dgst -binary -sha1 -hmac "$1&" | openssl base64)
+  url_encode "$sign"
 }
 
 #$1:AccessKeyId,$2:AccessKeySecret
@@ -219,12 +225,12 @@ add_dns(){
     rid=$(echo "$resp" | jq -r ".RecordId")
     if echo "$resp" | grep -qw "DomainRecordDuplicate";then
       rv=1
-      log "The DNS record [$4.$3: ${value}] already exists."
+      log 1 "The DNS record [$4.$3: ${value}] already exists."
     elif [ "${rid}" != "null" ];then
-      log "The DNS record [$4.$3: ${value}] has been added successfully."
+      log 2 "The DNS record [$4.$3: ${value}] has been added successfully."
     else
       rv=4
-      log "Failed to add dns [$4.$3: ${value}]."
+      log 0 "Failed to add dns [$4.$3: ${value}]."
     fi
   done
   echo ${rv}
@@ -240,12 +246,12 @@ del_dns(){
     sign=$(sign_data "$2" "${params}")
     req_url="${ALIDNS_URL}?${params}&Signature=${sign}"
     resp=$($_CURL "$req_url")
-    rrid=$(echo "$resp" | jq -r ".RecordId");
-    if [ "${rrid}" != "null" ];then
-      log "The DNS record [$rid] has been deleted successfully."
+    resp_rid=$(echo "$resp" | jq -r ".RecordId");
+    if [ "${resp_rid}" != "null" ];then
+      log 2 "The DNS record [$rid] has been deleted successfully."
     else
       rv=2
-      log "Failed to delete dns [$rid}]."
+      log 0 "Failed to delete dns [$rid}]."
     fi
   done
   echo ${rv}
@@ -279,15 +285,17 @@ update_dns(){
   rid=$(echo "$resp" | jq -r ".RecordId");
   if echo "$resp" | grep -qw "DomainRecordDuplicate";then
     rv=1
-    log "The DNS record [$4.$3: $6] already exists."
+    log 1 "The DNS record [$4.$3: $6] already exists."
   elif [ "${rid}" != "null" ];then
-    log "The DNS record [$4.$3: $6] has been updated successfully."
+    log 2 "The DNS record [$4.$3: $6] has been updated successfully."
   else
     rv=3
-    log "Failed to update dns [$4.$3: $6]."
+    log 0 "Failed to update dns [$4.$3: $6]."
   fi
   echo ${rv}
 }
+
+################ Aliyun Private Functions end ################
 
 #$1:AccessKeyId,$2:AccessKeySecret,$3:DomainName,$4:RR,$5:0-wan 1-local,$6:ipv4/6
 detect_update(){
@@ -301,7 +309,7 @@ detect_update(){
     real_ips=$(get_wan_ip $6)
   fi
   if [ -z "${real_ips}" ]; then
-    log "Error! can not get ip."
+    log 0 "Error! can not get ip."
     echo "3"
     return 3
   fi
@@ -324,16 +332,16 @@ install(){
   pkg_cmd=apt
   pkg_ssl=openssl
   restart_cmd="systemctl restart cron"
-  if [ $(command -v opkg) ];then
+  if [ -x "$(command -v opkg)" ];then
     pkg_cmd=opkg
     pkg_ssl=openssl-util
     restart_cmd="/etc/init.d/cron restart"
-  elif [ $(command -v yum) ];then
+  elif [ -x "$(command -v yum)" ];then
     pkg_cmd=yum
     restart_cmd="systemctl restart crond"
   fi
-  if [ $(command -v curl) ] && [ $(command -v jq) ] && [ $(command -v openssl) ]; then
-    echo "Check dependency package(curl,jq,openssl): passed."
+  if [ -x "$(command -v curl)" ] && [ -x "$(command -v jq)" ] && [ -x "$(command -v openssl)" ]; then
+    log 2 "Check dependency package(curl,jq,openssl): passed."
   else
     $pkg_cmd update && $pkg_cmd install curl jq $pkg_ssl
   fi
@@ -341,24 +349,24 @@ install(){
   chmod +x  /sbin/ddns_ali.sh
   ( crontab -l | grep -v -F "$CRON_CMD" ; echo "*/5 * * * * $CRON_CMD" ) | crontab -
   $restart_cmd
-  echo "ddns server is installed."
+  log 2 "ddns server is installed."
   exit
 }
 
 uninstall(){
   ( crontab -l | grep -v -F "$CRON_CMD" ) | crontab -
   rm -rf /sbin/ddns_ali.sh
-  echo "ddns server is removed."
+  log 2 "ddns server is removed."
   exit
 }
 
 help()
 {
-  printf "ddns_ali.sh ver:%s\nUsage:\n" "$VERSION"
-  printf "$0 [-46adhur] [-i <key id>] [-s <key secret>] [-n <dns name>] [-l <ip source>] [-t <dns type>] [-v <dns value arrays>]\n"
-  printf "$0 --install/uninstall\n"
-  printf "only for Synology DSM ddns:\n"
-  printf "$0 <key id> <key secret> <dns name>\n"
+  printf "%s ver:%s\nUsage:\n" "$0" "$VERSION"
+  printf "%s [-46adhur] [-i <key id>] [-s <key secret>] [-n <dns name>] [-l <ip source>] [-t <dns type>] [-v <dns value arrays>]\n" "$0"
+  printf "%s --install/uninstall\n" "$0"
+  printf "*only for Synology DSM ddns:\n"
+  printf "%s <key id> <key secret> <dns name>\n" "$0"
   printf "\t-4/6 get ipv4/6;\n"
   printf "\t-a add dns;\n"
   printf "\t-d auto detect ip and update;\n"
@@ -394,7 +402,7 @@ main(){
       - ) case "${OPTARG}" in
           install ) install ;;
           uninstall ) uninstall ;;
-          *) log "Unknown option --${OPTARG}"
+          *) log 0 "Unknown option --${OPTARG}"
             help
           ;;
         esac ;;
@@ -422,7 +430,7 @@ main(){
       if [ "${act}" = 4 ];then
         echo "${STATUS}" | cut -d ' ' -f$((rv+1))
       else
-        log "Authentication failed."
+        log 0 "Authentication failed."
       fi
       exit ${rv}
     fi
@@ -433,7 +441,7 @@ main(){
       if [ "${act}" = 4 ];then
         echo "${STATUS}" | cut -d ' ' -f$((rv+1))
       else
-        log "The hostname [${name}] does not exist in this user account."
+        log 0 "The hostname [${name}] does not exist in this user account."
       fi
       exit ${rv}
     fi
