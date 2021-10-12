@@ -23,7 +23,7 @@ LOG_LEVEL=2
 #$1:level $2:string
 #ERROR-0,WARN-1,INFO-2,DEBUG-3
 log() {
-  [ $1 -le ${LOG_LEVEL} ] && printf "[%s]: %s\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$2" >&2
+  [ $1 -le ${LOG_LEVEL} ] && printf "[%s]: %b\n" "$(date +'%Y-%m-%d %H:%M:%S')" "$2" >&2
 }
 
 #$1:string,$2:char, if $2 not set return array len,$ret:count
